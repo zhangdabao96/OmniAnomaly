@@ -271,14 +271,16 @@ class VAE(VarScopeObject):
         net = BayesianNet(observed=observed)
         with tf.variable_scope('h_for_q_z'):
             z_params = self.h_for_q_z(x)
+            #（rnn输出input_q, batch*window*rnn_num_hidden）
+            #x:(?,100,38) ;z_params: {'input_q':tf.tensor(?,100,500)}
         with tf.variable_scope('q_z_given_x'):
-            q_z_given_x = self.q_z_given_x(**z_params)
+            q_z_given_x = self.q_z_given_x(**z_params) #imput_q+均值和方差,传给distribution，得到实例
             assert (isinstance(q_z_given_x, Distribution))
         with tf.name_scope('z'):
-            z = net.add('z', q_z_given_x, n_samples=n_z,
+            z = net.add('z', q_z_given_x, n_samples=n_z,  #采样后的z，batch_size * time_step *  z_dim
                         group_ndims=self.z_group_ndims,
                         is_reparameterized=self.is_reparameterized,
-                        flow=posterior_flow)
+                        flow=posterior_flow) # TODO
         return net
 
     @instance_reuse
@@ -307,13 +309,16 @@ class VAE(VarScopeObject):
         Returns:
             BayesianNet: The variational net.
         """
+        # 'x':(?,100,38); 'z':(?,100,3)
         observed = {k: v for k, v in [('z', z), ('x', x)] if v is not None}
-        net = BayesianNet(observed=observed)
+        net = BayesianNet(observed=observed) # 空net中添加observe('x','z')
         with tf.name_scope('z'):
+            # 已有'z'的观察值, 并作为参数直接生成tensor（?,100,3）, 且更新了self._stochastic_tensors['z'] = tensor
             z = net.add('z', self.p_z, n_samples=n_z,
                         group_ndims=self.z_group_ndims,
                         is_reparameterized=self.is_reparameterized)
         with tf.variable_scope('h_for_p_x'):
+            # x_params:{'mean':(?,100,38),'std':(?,100,38)}
             x_params = self.h_for_p_x(z)
         with tf.variable_scope('p_x_given_z'):
             p_x_given_z = self.p_x_given_z(**x_params)
@@ -351,11 +356,13 @@ class VAE(VarScopeObject):
             q_net = self.variational(x, n_z=n_z, posterior_flow=posterior_flow)
 
             # automatically detect the `latent_axis` for this chain
+            # n_z=none, 采样数是1，返回数据没有n_samples维度；否则多一个n_samples维度
             if n_z is not None:
                 latent_axis = 0
             else:
                 latent_axis = None
 
+            # Treat this BayesianNet as variational, and build the model net chained after this variational net.
             chain = q_net.variational_chain(
                 lambda observed: self.model(n_z=n_z, n_x=None, **observed),
                 latent_axis=latent_axis,

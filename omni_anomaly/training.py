@@ -202,9 +202,9 @@ class Trainer(VarScopeObject):
         if len(values.shape) != 2:
             raise ValueError('`values` must be a 2-D array')
 
-        n = int(len(values) * valid_portion)
+        n = int(len(values) * valid_portion) #划分训练数据与验证数据
         train_values, v_x = values[:-n], values[-n:]
-
+        # 训练数据/验证数据 随机划分成一个一个的batch
         train_sliding_window = BatchSlidingWindow(
             array_size=len(train_values),
             window_size=self.model.window_length,

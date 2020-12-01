@@ -49,7 +49,7 @@ class ExpConfig(Config):
     lr_anneal_step_freq = None
     std_epsilon = 1e-4
 
-    # evaluation parameters
+    # evaluation parameters ???
     test_n_z = 1
     test_batch_size = 50
     test_start = 0
@@ -92,6 +92,7 @@ def main():
     )
 
     # prepare the data
+    # (28479,38), (28479,38),(28479)
     (x_train, _), (x_test, y_test) = \
         get_data(config.dataset, config.max_train_size, config.max_test_size, train_start=config.train_start,
                  test_start=config.test_start)

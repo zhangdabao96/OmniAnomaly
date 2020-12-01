@@ -34,12 +34,12 @@ class RecurrentDistribution(Distribution):
     def get_batch_shape(self):
         return self.normal.get_batch_shape()
 
-    def sample_step(self, a, t):
-        z_previous, mu_q_previous, std_q_previous = a
+    def sample_step(self, a, t): # a:上次返回；t: (samples*3; batchsize*500)
+        z_previous, mu_q_previous, std_q_previous = a #n_sample, batchsize, z_dim
         noise_n, input_q_n = t
-        input_q_n = tf.broadcast_to(input_q_n,
+        input_q_n = tf.broadcast_to(input_q_n, # n_sample*input_q_n
                                     [tf.shape(z_previous)[0], tf.shape(input_q_n)[0], input_q_n.shape[1]])
-        input_q = tf.concat([input_q_n, z_previous], axis=-1)
+        input_q = tf.concat([input_q_n, z_previous], axis=-1) # n_sample, batchsize, 500+3
         mu_q = self.mean_q_mlp(input_q, reuse=tf.AUTO_REUSE)  # n_sample * batch_size * z_dim
 
         std_q = self.std_q_mlp(input_q)  # n_sample * batch_size * z_dim
@@ -77,7 +77,7 @@ class RecurrentDistribution(Distribution):
         self.std_q_mlp = std_q_mlp
         self.mean_q_mlp = mean_q_mlp
         self._check_numerics = check_numerics
-        self.input_q = tf.transpose(input_q, [1, 0, 2])
+        self.input_q = tf.transpose(input_q, [1, 0, 2]) # window*batch*dense_hidden 100*50*500
         self._dtype = input_q.dtype
         self._is_reparameterized = is_reparameterized
         self._is_continuous = True
@@ -100,10 +100,11 @@ class RecurrentDistribution(Distribution):
             noise = tf.transpose(noise, [1, 0, 2])  # window_length * n_samples * z_dim
             noise = tf.truncated_normal(tf.shape(noise))
 
+            # n_sample, batchsize, z_dim
             time_indices_shape = tf.convert_to_tensor([n_samples, tf.shape(self.input_q)[1], self.z_dim])
 
             samples = tf.scan(fn=self.sample_step,
-                              elems=(noise, self.input_q),
+                              elems=(noise, self.input_q),  #100*samples*3;  100*50*500
                               initializer=(tf.zeros(time_indices_shape),
                                            tf.zeros(time_indices_shape),
                                            tf.ones(time_indices_shape)),

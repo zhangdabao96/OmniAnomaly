@@ -68,10 +68,10 @@ class OmniAnomaly(VarScopeObject):
                 ),
                 h_for_q_z=Lambda(
                     lambda x: {'input_q': rnn(x=x,
-                                              window_length=config.window_length,
+                                              window_length=config.window_length, # 窗口长度
                                               rnn_num_hidden=config.rnn_num_hidden,
-                                              hidden_dense=2,
-                                              dense_dim=config.dense_dim,
+                                              hidden_dense=2, #层数
+                                              dense_dim=config.dense_dim, #输出维度
                                               name="rnn_q_z")},
                     name='q_z_given_x'
                 ) if config.use_connected_z_q else Lambda(
@@ -137,6 +137,7 @@ class OmniAnomaly(VarScopeObject):
         with tf.name_scope('training_loss'):
             chain = self.vae.chain(x, n_z=n_z, posterior_flow=self._posterior_flow)
             x_log_prob = chain.model['x'].log_prob(group_ndims=0)
+            # log_joint(?,100)
             log_joint = tf.reduce_sum(x_log_prob, -1)
             chain.vi.training.sgvb()
             vi = VariationalInference(
@@ -185,10 +186,11 @@ class OmniAnomaly(VarScopeObject):
             z_mean = tf.reduce_mean(z_samples, axis=0) if n_z is not None else z_samples
             z_std = tf.sqrt(tf.reduce_sum(tf.square(z_samples - z_mean), axis=0) / (n_z - 1)) \
                 if n_z is not None and n_z > 1 else tf.zeros_like(z_mean)
+            # (?,100,3+3)
             z = tf.concat((z_mean, z_std), axis=-1)
-
+            # r_prob: (?,100)
             r_prob = p_net['x'].log_prob(group_ndims=int(not self.config.get_score_on_dim))
 
             if last_point_only:
-                r_prob = r_prob[:, -1]
+                r_prob = r_prob[:, -1]  # (?,)一维
             return r_prob, z

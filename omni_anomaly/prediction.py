@@ -117,6 +117,7 @@ class Predictor(VarScopeObject):
                 start_iter_time = time.time()
                 feed_dict = dict(six.iteritems(self._feed_dict))
                 feed_dict[self._input_x] = b_x
+                # b_r：（50,）一个batch的score
                 b_r, q_net_z = sess.run(self._get_score_without_y(),
                                         feed_dict=feed_dict)
                 collector.append(b_r)
