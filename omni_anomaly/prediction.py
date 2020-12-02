@@ -50,6 +50,8 @@ class Predictor(VarScopeObject):
             # input placeholders
             self._input_x = tf.placeholder(
                 dtype=tf.float32, shape=[None, model.window_length, model.x_dims], name='input_x')
+            self._input_feature = tf.placeholder(
+                dtype=tf.float32, shape=[None, model.window_length, model.x_dims*3], name='input_feature')
             self._input_y = tf.placeholder(
                 dtype=tf.int32, shape=[None, model.window_length], name='input_y')
 
@@ -62,6 +64,7 @@ class Predictor(VarScopeObject):
                  tf.name_scope('score_without_y'):
                 self._score_without_y, self._q_net_z = self.model.get_score(
                     x=self._input_x,
+                    x_feature=self._input_feature,
                     n_z=self._n_z,
                     last_point_only=self._last_point_only
                 )
@@ -116,7 +119,10 @@ class Predictor(VarScopeObject):
             for b_x, in sliding_window.get_iterator([values]):
                 start_iter_time = time.time()
                 feed_dict = dict(six.iteritems(self._feed_dict))
-                feed_dict[self._input_x] = b_x
+
+                feed_dict[self._input_x] = b_x[..., :self._model.x_dims]
+                feed_dict[self._input_feature] = b_x[..., self._model.x_dims:]
+
                 # b_r：（50,）一个batch的score
                 b_r, q_net_z = sess.run(self._get_score_without_y(),
                                         feed_dict=feed_dict)

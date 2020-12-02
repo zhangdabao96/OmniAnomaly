@@ -112,13 +112,15 @@ class Trainer(VarScopeObject):
             # input placeholders
             self._input_x = tf.placeholder(
                 dtype=tf.float32, shape=[None, model.window_length, model.x_dims], name='input_x')
+            self._input_feature = tf.placeholder(
+                dtype=tf.float32, shape=[None, model.window_length, model.x_dims*3], name='input_feature')
             self._learning_rate = tf.placeholder(
                 dtype=tf.float32, shape=(), name='learning_rate')
 
             # compose the training loss
             with tf.name_scope('loss'):
                 loss = model.get_training_loss(
-                    x=self._input_x, n_z=n_z)
+                    x=self._input_x, x_feature=self._input_feature, n_z=n_z)
                 if use_regularization_loss:
                     loss += tf.losses.get_regularization_loss()
                 self._loss = loss
@@ -244,7 +246,10 @@ class Trainer(VarScopeObject):
                     start_batch_time = time.time()
                     feed_dict = dict(six.iteritems(self._feed_dict))
                     feed_dict[self._learning_rate] = lr
-                    feed_dict[self._input_x] = batch_x
+
+                    feed_dict[self._input_x] = batch_x[..., :self._model.x_dims]
+                    feed_dict[self._input_feature] = batch_x[..., self._model.x_dims:]
+
                     loss, _ = sess.run(
                         [self._loss, self._train_op], feed_dict=feed_dict)
                     loop.collect_metrics({'loss': loss})
@@ -265,7 +270,8 @@ class Trainer(VarScopeObject):
                                 start_batch_time = time.time()
                                 feed_dict = dict(
                                     six.iteritems(self._valid_feed_dict))
-                                feed_dict[self._input_x] = b_v_x
+                                feed_dict[self._input_x] = b_v_x[..., :self._model.x_dims]
+                                feed_dict[self._input_feature] = b_v_x[..., self._model.x_dims:]
                                 loss = sess.run(self._loss, feed_dict=feed_dict)
                                 valid_batch_time.append(time.time() - start_batch_time)
                                 mc.collect(loss, weight=len(b_v_x))

@@ -7,6 +7,7 @@ import time
 import warnings
 from argparse import ArgumentParser
 from pprint import pformat, pprint
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 import numpy as np
 import tensorflow as tf
@@ -22,6 +23,8 @@ from omni_anomaly.utils import get_data_dim, get_data, save_z
 
 
 class ExpConfig(Config):
+    with_conditional = True
+
     # dataset configuration
     dataset = "machine-1-1"
     x_dim = get_data_dim(dataset)
@@ -31,7 +34,7 @@ class ExpConfig(Config):
     use_connected_z_p = True
 
     # model parameters
-    z_dim = 3
+    z_dim = 30
     rnn_cell = 'GRU'  # 'GRU', 'LSTM' or 'Basic'
     rnn_num_hidden = 500
     window_length = 100
@@ -85,6 +88,17 @@ class ExpConfig(Config):
     test_score_filename = 'test_score.pkl'
 
 
+def get_feature(data):
+    feature = np.empty((data.shape[0], 3 * config.x_dim), dtype=np.float)
+    for i in range(config.x_dim):
+        col = data[:, i]
+        res = seasonal_decompose(col, period=1440, extrapolate_trend='freq')
+        feature[:, i * 3] = res.trend
+        feature[:, i * 3 + 1] = res.seasonal
+        feature[:, i * 3 + 2] = res.resid
+    return feature
+
+
 def main():
     logging.basicConfig(
         level='INFO',
@@ -96,6 +110,12 @@ def main():
     (x_train, _), (x_test, y_test) = \
         get_data(config.dataset, config.max_train_size, config.max_test_size, train_start=config.train_start,
                  test_start=config.test_start)
+
+    feature_train = get_feature(x_train)
+    feature_test = get_feature(x_test)
+
+    x_train = np.hstack([x_train, feature_train])
+    x_test = np.hstack([x_test, feature_test])
 
     # construct the model under `variable_scope` named 'model'
     with tf.variable_scope('model') as model_vs:
@@ -199,7 +219,6 @@ def main():
 
 
 if __name__ == '__main__':
-
     # get config obj
     config = ExpConfig()
 
