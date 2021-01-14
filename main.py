@@ -5,9 +5,11 @@ import pickle
 import sys
 import time
 import warnings
+import pywt
 from argparse import ArgumentParser
 from pprint import pformat, pprint
-
+from statsmodels.tsa.seasonal import seasonal_decompose
+os.environ['CUDA_VISIBLE_DEVICES']='2'
 import numpy as np
 import tensorflow as tf
 from tfsnippet.examples.utils import MLResults, print_with_title
@@ -22,6 +24,9 @@ from omni_anomaly.utils import get_data_dim, get_data, save_z
 
 
 class ExpConfig(Config):
+    with_conditional = True
+    gcn_type = 'to'
+
     # dataset configuration
     dataset = "machine-1-1"
     x_dim = get_data_dim(dataset)
@@ -31,14 +36,14 @@ class ExpConfig(Config):
     use_connected_z_p = True
 
     # model parameters
-    z_dim = 3
+    z_dim = 10
     rnn_cell = 'GRU'  # 'GRU', 'LSTM' or 'Basic'
     rnn_num_hidden = 500
     window_length = 100
     dense_dim = 500
     posterior_flow_type = 'nf'  # 'nf' or None
     nf_layers = 20  # for nf
-    max_epoch = 10
+    max_epoch = 5
     train_start = 0
     max_train_size = None  # `None` means full train set
     batch_size = 50
@@ -85,6 +90,36 @@ class ExpConfig(Config):
     test_score_filename = 'test_score.pkl'
 
 
+def get_feature(data):
+    # seasonal_decompose
+    logging.info('get feature v1')
+    feature = np.empty((data.shape[0], 3 * config.x_dim), dtype=np.float)
+    for i in range(config.x_dim):
+        col = data[:, i]
+        res = seasonal_decompose(col, period=1440, extrapolate_trend='freq')
+        feature[:, i * 3] = res.trend
+        feature[:, i * 3 + 1] = res.seasonal
+        feature[:, i * 3 + 2] = res.resid
+    return feature
+
+def get_feature_2(data):
+    # fluc, seasonal_c, local_c
+    logging.info('get feature v2')
+    feature = np.empty((data.shape[0], 3 * config.x_dim), dtype=np.float)
+    for i in range(config.x_dim):
+        col = data[:, i]
+        fluc = col.std() / col.mean() if col.mean()>0 else col.std()
+        diff = col[1440:] - col[:-1440]
+        seasonal_c = diff.std()
+        cA1, cD1 = pywt.dwt(col, 'db2')
+        D1 = pywt.upcoef('d', cD1, 'db2', 1)
+        local_c = D1.std()
+
+        feature[:, i * 3] = [fluc]*len(data)
+        feature[:, i * 3 + 1] = [seasonal_c]*len(data)
+        feature[:, i * 3 + 2] = [local_c]*len(data)
+    return feature
+
 def main():
     logging.basicConfig(
         level='INFO',
@@ -96,6 +131,12 @@ def main():
     (x_train, _), (x_test, y_test) = \
         get_data(config.dataset, config.max_train_size, config.max_test_size, train_start=config.train_start,
                  test_start=config.test_start)
+
+    feature_train = get_feature_2(x_train)
+    feature_test = get_feature_2(x_test)
+
+    x_train = np.hstack([x_train, feature_train])
+    x_test = np.hstack([x_test, feature_test])
 
     # construct the model under `variable_scope` named 'model'
     with tf.variable_scope('model') as model_vs:
@@ -196,10 +237,12 @@ def main():
                 saver.save()
             print('=' * 30 + 'result' + '=' * 30)
             pprint(best_valid_metrics)
+            print('=' * 30 + 'config' + '=' * 30)
+            print(config.__dict__)
 
 
 if __name__ == '__main__':
-
+    
     # get config obj
     config = ExpConfig()
 
