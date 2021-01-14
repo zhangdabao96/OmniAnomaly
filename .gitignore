@@ -1,4 +1,6 @@
 # Created by .ignore support plugin (hsz.mobi)
+model/
+result/
 ### Python template
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -108,3 +110,4 @@ venv.bak/
 .idea/
 
 processed/
+env.yml
