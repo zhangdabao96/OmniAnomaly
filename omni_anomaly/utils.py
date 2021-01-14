@@ -4,8 +4,127 @@ import pickle
 
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
+#import scipy.stats as stats
+import scipy.special as special
 
 prefix = "processed"
+
+
+def sum_of_squares(a, axis=-1):
+    if axis is None:
+        a = np.ravel(a)
+        outaxis = 0
+    else:
+        a = np.asarray(a)
+        outaxis = axis
+    if a.ndim == 0:
+        a = np.atleast_1d(a)
+    return np.sum(a * a, outaxis)
+
+
+def pearsonr(x, y, eps=1e-5):
+    r"""
+    Calculate a Pearson correlation coefficient and the p-value for testing
+    non-correlation.
+
+    The Pearson correlation coefficient measures the linear relationship
+    between two datasets. Strictly speaking, Pearson's correlation requires
+    that each dataset be normally distributed, and not necessarily zero-mean.
+    Like other correlation coefficients, this one varies between -1 and +1
+    with 0 implying no correlation. Correlations of -1 or +1 imply an exact
+    linear relationship. Positive correlations imply that as x increases, so
+    does y. Negative correlations imply that as x increases, y decreases.
+
+    The p-value roughly indicates the probability of an uncorrelated system
+    producing datasets that have a Pearson correlation at least as extreme
+    as the one computed from these datasets. The p-values are not entirely
+    reliable but are probably reasonable for datasets larger than 500 or so.
+
+    Parameters
+    ----------
+    x : (N,) array_like
+        Input
+    y : (N,) array_like
+        Input
+
+    Returns
+    -------
+    r : float
+        Pearson's correlation coefficient
+    p-value : float
+        2-tailed p-value
+
+    Notes
+    -----
+
+    The correlation coefficient is calculated as follows:
+
+    .. math::
+
+        r_{pb} = \frac{\sum (x - m_x) (y - m_y)}
+                      {\sqrt{\sum (x - m_x)^2 \sum (y - m_y)^2}}
+
+    where :math:`m_x` is the mean of the vector :math:`x` and :math:`m_y` is
+    the mean of the vector :math:`y`.
+
+
+    References
+    ----------
+    http://www.statsoft.com/textbook/glosp.html#Pearson%20Correlation
+
+    Examples
+    --------
+    >>> from scipy import stats
+    >>> a = np.array([0, 0, 0, 1, 1, 1, 1])
+    >>> b = np.arange(7)
+    >>> stats.pearsonr(a, b)
+    (0.8660254037844386, 0.011724811003954654)
+
+    >>> stats.pearsonr([1,2,3,4,5], [5,6,7,8,7])
+    (0.83205029433784372, 0.080509573298498519)
+    """
+    # x and y should have same length.
+    x = np.asarray(x)
+    y = np.asarray(y)
+    n = x.shape[-1]
+    mx = x.mean(axis=-1, keepdims=True)
+    my = y.mean(axis=-1, keepdims=True)
+    xm, ym = x - mx, y - my
+    r_num = np.sum(xm * ym, axis=-1)
+    # r_den = np.sqrt(sum_of_squares(xm) * sum_of_squares(ym))
+    xm = np.sum(xm**2, axis=-1)
+    ym = np.sum(ym**2, axis=-1)
+    r_den = np.sqrt(xm * ym)
+    idx = np.where(r_den==0)[0]
+    r_den[idx] = eps
+    r = r_num / r_den
+    r[idx] = 0.0
+    # Presumably, if abs(r) > 1, then it is only some small artifact of
+    # floating point arithmetic.
+    r = np.clip(r, -1.0, 1.0)
+    df = n - 2
+    idx = np.where(abs(r) == 1.0)[0]
+    r[idx] += eps
+    t_squared = r**2 * (df / ((1.0 - r) * (1.0 + r)))
+    prob = special.betainc(
+        0.5*df, 0.5, np.fmin(np.asarray(df / (df + t_squared)), 1.0)
+    )
+    prob[idx] = 0.0
+    r[idx] -= eps
+
+    return r, prob
+
+
+def get_adj(input_x, type='fo'):
+    # input_x: (batch, window, x_dim)
+    if type == 'fo':
+        input_x = input_x.transpose(0, 2, 1)
+    adj = np.empty((input_x.shape[0], input_x.shape[1], input_x.shape[1]), dtype=np.float32)
+    for j in range(input_x.shape[1]):
+        for k in range(j, input_x.shape[1]):
+            adj[:, k, j] = adj[:, j, k] = pearsonr(input_x[:, j], input_x[:, k])[0]
+    # print('-----adj---------')
+    return np.nan_to_num(adj)
 
 
 def save_z(z, filename='z'):
