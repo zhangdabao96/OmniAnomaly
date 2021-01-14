@@ -13,6 +13,7 @@ from omni_anomaly.recurrent_distribution import RecurrentDistribution
 from omni_anomaly.vae import Lambda, VAE
 from omni_anomaly.wrapper import TfpDistribution, softplus_std, rnn, wrap_params_net
 
+from spektral.layers import GraphAttention
 
 class OmniAnomaly(VarScopeObject):
     def __init__(self, config, name=None, scope=None):
@@ -27,6 +28,8 @@ class OmniAnomaly(VarScopeObject):
             self._window_length = config.window_length
             self._x_dims = config.x_dim
             self._z_dims = config.z_dim
+            self._gcn_FO = GraphAttention(config.window_length)
+            self._gcn_TO = GraphAttention(config.x_dim)
             self._vae = VAE(
                 p_z=TfpDistribution(
                     LinearGaussianStateSpaceModel(
@@ -92,8 +95,19 @@ class OmniAnomaly(VarScopeObject):
                         )
                     ),
                     name='q_z_given_x'
-                )
+                ),
+                with_conditional=config.with_conditional
             )
+
+    def run_gcn(self, x, adj):
+        if self.config.gcn_type == 'fo':
+            x = tf.transpose(x, perm=[0, 2, 1]) #b x w
+            out = self._gcn_FO([x, adj])
+            out = tf.transpose(out, perm=[0, 2, 1])
+        else:
+            # adj = tf.constant(1.0, shape=[1, self.config.window_length, self.config.window_length])
+            out = self._gcn_TO([x, adj])
+        return out
 
     @property
     def x_dims(self):
@@ -119,13 +133,15 @@ class OmniAnomaly(VarScopeObject):
     def window_length(self):
         return self._window_length
 
-    def get_training_loss(self, x, n_z=None):
+    def get_training_loss(self, x, x_feature, n_z=None):
         """
         Get the training loss for `x`.
 
         Args:
             x (tf.Tensor): 2-D `float32` :class:`tf.Tensor`, the windows of
                 KPI observations in a mini-batch.
+            x_ feature  (tf.Tensor): 2-D `float32` :class:`tf.Tensor`, the 
+                extra input feature
             n_z (int or None): Number of `z` samples to take for each `x`.
                 (default :obj:`None`, one sample without explicit sampling
                 dimension)
@@ -135,7 +151,7 @@ class OmniAnomaly(VarScopeObject):
                 by gradient descent algorithms.
         """
         with tf.name_scope('training_loss'):
-            chain = self.vae.chain(x, n_z=n_z, posterior_flow=self._posterior_flow)
+            chain = self.vae.chain(x, x_feature, n_z=n_z, posterior_flow=self._posterior_flow)
             x_log_prob = chain.model['x'].log_prob(group_ndims=0)
             # log_joint(?,100)
             log_joint = tf.reduce_sum(x_log_prob, -1)
@@ -148,7 +164,7 @@ class OmniAnomaly(VarScopeObject):
             loss = tf.reduce_mean(vi.training.sgvb())
             return loss
 
-    def get_score(self, x, n_z=None,
+    def get_score(self, x, x_feature, n_z=None,
                   last_point_only=True):
         """
         Get the reconstruction probability for `x`.
@@ -160,6 +176,8 @@ class OmniAnomaly(VarScopeObject):
         Args:
             x (tf.Tensor): 2-D `float32` :class:`tf.Tensor`, the windows of
                 KPI observations in a mini-batch.
+            x_ feature  (tf.Tensor): 2-D `float32` :class:`tf.Tensor`, the 
+                extra input feature
             n_z (int or None): Number of `z` samples to take for each `x`.
                 (default :obj:`None`, one sample without explicit sampling
                 dimension)
@@ -177,11 +195,12 @@ class OmniAnomaly(VarScopeObject):
         """
         with tf.name_scope('get_score'):
             x_r = x
+            x_feature_r = x_feature
 
             # get the reconstruction probability
             print('-' * 30, 'testing', '-' * 30)
-            q_net = self.vae.variational(x=x_r, n_z=n_z, posterior_flow=self._posterior_flow)  # notice: x=x_r
-            p_net = self.vae.model(z=q_net['z'], x=x, n_z=n_z)  # notice: x=x
+            q_net = self.vae.variational(x=x_r, x_feature=x_feature_r, n_z=n_z, posterior_flow=self._posterior_flow)  # notice: x=x_r
+            p_net = self.vae.model(z=q_net['z'], x=x, x_feature=x_feature, n_z=n_z)  # notice: x=x
             z_samples = q_net['z'].tensor
             z_mean = tf.reduce_mean(z_samples, axis=0) if n_z is not None else z_samples
             z_std = tf.sqrt(tf.reduce_sum(tf.square(z_samples - z_mean), axis=0) / (n_z - 1)) \

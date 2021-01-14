@@ -11,7 +11,7 @@ from tfsnippet.utils import (reopen_variable_scope,
                              ensure_variables_initialized,
                              get_variables_as_dict)
 
-from omni_anomaly.utils import BatchSlidingWindow
+from omni_anomaly.utils import BatchSlidingWindow, get_adj
 
 __all__ = ['Trainer']
 
@@ -112,13 +112,18 @@ class Trainer(VarScopeObject):
             # input placeholders
             self._input_x = tf.placeholder(
                 dtype=tf.float32, shape=[None, model.window_length, model.x_dims], name='input_x')
+            self._input_feature = tf.placeholder(
+                dtype=tf.float32, shape=[None, model.window_length, model.x_dims*3], name='input_feature')
             self._learning_rate = tf.placeholder(
                 dtype=tf.float32, shape=(), name='learning_rate')
+            self._input_adj = tf.placeholder(
+                dtype=tf.float32, shape=[None, None, None], name='input_adj')
 
             # compose the training loss
             with tf.name_scope('loss'):
+                gcn_feat = model.run_gcn(self._input_x, self._input_adj)
                 loss = model.get_training_loss(
-                    x=self._input_x, n_z=n_z)
+                    x=self._input_x, x_feature=gcn_feat, n_z=n_z)
                 if use_regularization_loss:
                     loss += tf.losses.get_regularization_loss()
                 self._loss = loss
@@ -202,7 +207,7 @@ class Trainer(VarScopeObject):
         if len(values.shape) != 2:
             raise ValueError('`values` must be a 2-D array')
 
-        n = int(len(values) * valid_portion) #划分训练数据与验证数据
+        n = int(len(values) * valid_portion)  # 划分训练数据与验证数据
         train_values, v_x = values[:-n], values[-n:]
         # 训练数据/验证数据 随机划分成一个一个的batch
         train_sliding_window = BatchSlidingWindow(
@@ -242,9 +247,14 @@ class Trainer(VarScopeObject):
                 for step, (batch_x,) in loop.iter_steps(train_iterator):
                     # run a training step
                     start_batch_time = time.time()
+                    input_adj = get_adj(batch_x[..., :self._model.x_dims], self._model.config.gcn_type)
+
                     feed_dict = dict(six.iteritems(self._feed_dict))
                     feed_dict[self._learning_rate] = lr
-                    feed_dict[self._input_x] = batch_x
+
+                    feed_dict[self._input_x] = batch_x[..., :self._model.x_dims]
+                    feed_dict[self._input_feature] = batch_x[..., self._model.x_dims:]
+                    feed_dict[self._input_adj] = input_adj
                     loss, _ = sess.run(
                         [self._loss, self._train_op], feed_dict=feed_dict)
                     loop.collect_metrics({'loss': loss})
@@ -263,9 +273,13 @@ class Trainer(VarScopeObject):
                             v_it = valid_sliding_window.get_iterator([v_x])
                             for (b_v_x,) in v_it:
                                 start_batch_time = time.time()
+                                input_adj = get_adj(b_v_x[..., :self._model.x_dims], self._model.config.gcn_type)
+
                                 feed_dict = dict(
                                     six.iteritems(self._valid_feed_dict))
-                                feed_dict[self._input_x] = b_v_x
+                                feed_dict[self._input_x] = b_v_x[..., :self._model.x_dims]
+                                feed_dict[self._input_feature] = b_v_x[..., self._model.x_dims:]
+                                feed_dict[self._input_adj] = input_adj
                                 loss = sess.run(self._loss, feed_dict=feed_dict)
                                 valid_batch_time.append(time.time() - start_batch_time)
                                 mc.collect(loss, weight=len(b_v_x))

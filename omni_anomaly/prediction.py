@@ -7,7 +7,7 @@ import tensorflow as tf
 from tfsnippet.utils import (VarScopeObject, get_default_session_or_error,
                              reopen_variable_scope)
 
-from omni_anomaly.utils import BatchSlidingWindow
+from omni_anomaly.utils import BatchSlidingWindow, get_adj
 
 __all__ = ['Predictor']
 
@@ -50,8 +50,12 @@ class Predictor(VarScopeObject):
             # input placeholders
             self._input_x = tf.placeholder(
                 dtype=tf.float32, shape=[None, model.window_length, model.x_dims], name='input_x')
+            self._input_feature = tf.placeholder(
+                dtype=tf.float32, shape=[None, model.window_length, model.x_dims*3], name='input_feature')
             self._input_y = tf.placeholder(
                 dtype=tf.int32, shape=[None, model.window_length], name='input_y')
+            self._input_adj = tf.placeholder(
+                dtype=tf.float32, shape=[None, None, None], name='input_adj')
 
             # outputs of interest
             self._score = self._score_without_y = None
@@ -60,8 +64,10 @@ class Predictor(VarScopeObject):
         if self._score_without_y is None:
             with reopen_variable_scope(self.variable_scope), \
                  tf.name_scope('score_without_y'):
+                gcn_feat = self.model.run_gcn(self._input_x, self._input_adj)
                 self._score_without_y, self._q_net_z = self.model.get_score(
                     x=self._input_x,
+                    x_feature=gcn_feat,
                     n_z=self._n_z,
                     last_point_only=self._last_point_only
                 )
@@ -115,8 +121,14 @@ class Predictor(VarScopeObject):
 
             for b_x, in sliding_window.get_iterator([values]):
                 start_iter_time = time.time()
+
+                input_adj = get_adj(b_x[..., :self._model.x_dims], self._model.config.gcn_type)
                 feed_dict = dict(six.iteritems(self._feed_dict))
-                feed_dict[self._input_x] = b_x
+
+                feed_dict[self._input_x] = b_x[..., :self._model.x_dims]
+                feed_dict[self._input_feature] = b_x[..., self._model.x_dims:]
+                feed_dict[self._input_adj] = input_adj
+
                 # b_r：（50,）一个batch的score
                 b_r, q_net_z = sess.run(self._get_score_without_y(),
                                         feed_dict=feed_dict)
