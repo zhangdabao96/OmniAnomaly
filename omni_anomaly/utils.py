@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import pickle
-
+import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 #import scipy.stats as stats
@@ -191,6 +191,7 @@ def get_data(dataset, max_train_size=None, max_test_size=None, print_log=True, d
     except (KeyError, FileNotFoundError):
         test_label = None
     if do_preprocess:
+        # train_data = data_clean(train_data)
         train_data = preprocess(train_data)
         test_data = preprocess(test_data)
     print("train set shape: ", train_data.shape)
@@ -198,6 +199,24 @@ def get_data(dataset, max_train_size=None, max_test_size=None, print_log=True, d
     print("test set label shape: ", test_label.shape)
     return (train_data, None), (test_data, test_label)
 
+def data_clean(df):
+    """
+    Filter extremely abnormal data in train data and fill it with nearby values
+    """
+    df = pd.DataFrame(df)
+    for c in df.columns:
+        x = df[c]
+        d1 = np.quantile(x,.25)
+        d3 = np.quantile(x,.75)
+        gap = d3 - d1
+        min_ = d1 - 3 * gap
+        max_ = d3 + 3 * gap
+        index = ((x < min_ ) | (x > max_))
+        x[index] = np.nan
+        x.interpolate(method='nearest', inplace=True)
+    return df.values
+        
+    
 
 def preprocess(df):
     """returns normalized and standardized data.

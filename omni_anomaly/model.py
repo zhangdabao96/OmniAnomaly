@@ -56,6 +56,7 @@ class OmniAnomaly(VarScopeObject):
                         h_for_dist=lambda x: rnn(x=x,
                                                  window_length=config.window_length,
                                                  rnn_num_hidden=config.rnn_num_hidden,
+                                                 rnn_cell = config.rnn_cell,
                                                  hidden_dense=2,
                                                  dense_dim=config.dense_dim,
                                                  name='rnn_p_x'),
@@ -73,6 +74,7 @@ class OmniAnomaly(VarScopeObject):
                     lambda x: {'input_q': rnn(x=x,
                                               window_length=config.window_length, # 窗口长度
                                               rnn_num_hidden=config.rnn_num_hidden,
+                                              rnn_cell = config.rnn_cell,
                                               hidden_dense=2, #层数
                                               dense_dim=config.dense_dim, #输出维度
                                               name="rnn_q_z")},
@@ -101,7 +103,7 @@ class OmniAnomaly(VarScopeObject):
 
     def run_gcn(self, x, adj):
         if self.config.gcn_type == 'fo':
-            x = tf.transpose(x, perm=[0, 2, 1]) #b x w
+            x = tf.transpose(x, perm=[0, 2, 1]) #after: batch x,38 window,100
             out = self._gcn_FO([x, adj])
             out = tf.transpose(out, perm=[0, 2, 1])
         else:

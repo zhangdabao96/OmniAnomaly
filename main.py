@@ -6,15 +6,21 @@ import sys
 import time
 import warnings
 import pywt
+import json
+import pickle
+import pandas as pd
 from argparse import ArgumentParser
 from pprint import pformat, pprint
 from statsmodels.tsa.seasonal import seasonal_decompose
 os.environ['CUDA_VISIBLE_DEVICES']='2'
-import numpy as np
-import tensorflow as tf
-from tfsnippet.examples.utils import MLResults, print_with_title
-from tfsnippet.scaffold import VariableSaver
-from tfsnippet.utils import get_variables_as_dict, register_config_arguments, Config
+with warnings.catch_warnings():
+    # suppress DeprecationWarning from NumPy caused by codes in TensorFlow-Probability
+    warnings.filterwarnings("ignore")
+    import numpy as np
+    import tensorflow as tf
+    from tfsnippet.examples.utils import MLResults, print_with_title
+    from tfsnippet.scaffold import VariableSaver
+    from tfsnippet.utils import get_variables_as_dict, register_config_arguments, Config
 
 from omni_anomaly.eval_methods import pot_eval, bf_search
 from omni_anomaly.model import OmniAnomaly
@@ -22,14 +28,19 @@ from omni_anomaly.prediction import Predictor
 from omni_anomaly.training import Trainer
 from omni_anomaly.utils import get_data_dim, get_data, save_z
 
+dataset_folder = 'ServerMachineDataset'
+file_list = os.listdir(os.path.join(dataset_folder, "train"))
 
 class ExpConfig(Config):
-    with_conditional = True
-    gcn_type = 'to'
+    with_conditional = True #gcn_feature
+    gcn_type = 'fo' # to / fo
 
     # dataset configuration
-    dataset = "machine-1-1"
+    dataset = "machine-1-4"
     x_dim = get_data_dim(dataset)
+
+    # dataset = None
+    # x_dim = None
 
     # model architecture configuration
     use_connected_z_q = True
@@ -39,7 +50,7 @@ class ExpConfig(Config):
     z_dim = 10
     rnn_cell = 'GRU'  # 'GRU', 'LSTM' or 'Basic'
     rnn_num_hidden = 500
-    window_length = 100
+    window_length = 120
     dense_dim = 500
     posterior_flow_type = 'nf'  # 'nf' or None
     nf_layers = 20  # for nf
@@ -88,7 +99,6 @@ class ExpConfig(Config):
     result_dir = 'result'  # Where to save the result file
     train_score_filename = 'train_score.pkl'
     test_score_filename = 'test_score.pkl'
-
 
 def get_feature(data):
     # seasonal_decompose
@@ -228,6 +238,14 @@ def main():
                         'threshold': th
                     })
                     best_valid_metrics.update(pot_result)
+                # results_all[name] = best_valid_metrics
+                with open('results_all/'+config.dataset+'.json', 'w') as f:
+                    json.dump({config.dataset:best_valid_metrics}, f, \
+                        default=lambda x: float(x) if isinstance(x, np.float32) else x)
+                
+                # with open('results_all/'+name[:-4]+'.pkl', "wb") as file:
+                #     pickle.dump({name:best_valid_metrics}, file)
+
                 results.update_metrics(best_valid_metrics)
 
             if config.save_dir is not None:
@@ -237,28 +255,54 @@ def main():
                 saver.save()
             print('=' * 30 + 'result' + '=' * 30)
             pprint(best_valid_metrics)
-            print('=' * 30 + 'config' + '=' * 30)
-            print(config.__dict__)
-
+            # print('=' * 30 + 'config' + '=' * 30)
+            # pprint(config.__dict__)
 
 if __name__ == '__main__':
-    
-    # get config obj
-    config = ExpConfig()
+    if ExpConfig.dataset is not None:
+        # get config obj
+        config = ExpConfig()
+        # parse the arguments
+        arg_parser = ArgumentParser()
+        register_config_arguments(config, arg_parser)
+        arg_parser.parse_args(sys.argv[1:])
+        config.x_dim = get_data_dim(config.dataset)
 
-    # parse the arguments
-    arg_parser = ArgumentParser()
-    register_config_arguments(config, arg_parser)
-    arg_parser.parse_args(sys.argv[1:])
-    config.x_dim = get_data_dim(config.dataset)
+        print_with_title('Configurations', pformat(config.to_dict()), after='\n')
+        
+        # open the result object and prepare for result directories if specified
+        results = MLResults(config.result_dir)
+        results.save_config(config)  # save experiment settings for review
+        results.make_dirs(config.save_dir, exist_ok=True)
+        with warnings.catch_warnings():
+            # suppress DeprecationWarning from NumPy caused by codes in TensorFlow-Probability
+            warnings.filterwarnings("ignore", category=DeprecationWarning, module='numpy')
+            warnings.filterwarnings("ignore", category=DeprecationWarning, module='tensorflow')
+            
+            main()
+    # else:
+    #     # get config obj
+    #     results_all = {}
+    #     for name in file_list:
+    #         print('=' * 30 + name[:-4] + '=' * 30)
+    #         config = ExpConfig()
+    #         config.dataset = name[:-4]
+    #         config.x_dim = get_data_dim(name[:-4])
+    #         # parse the arguments
+    #         arg_parser = ArgumentParser()
+    #         register_config_arguments(config, arg_parser)
+    #         arg_parser.parse_args(sys.argv[1:])
+    #         config.x_dim = get_data_dim(config.dataset)
 
-    print_with_title('Configurations', pformat(config.to_dict()), after='\n')
+    #         # print_with_title('Configurations', pformat(config.to_dict()), after='\n')
 
-    # open the result object and prepare for result directories if specified
-    results = MLResults(config.result_dir)
-    results.save_config(config)  # save experiment settings for review
-    results.make_dirs(config.save_dir, exist_ok=True)
-    with warnings.catch_warnings():
-        # suppress DeprecationWarning from NumPy caused by codes in TensorFlow-Probability
-        warnings.filterwarnings("ignore", category=DeprecationWarning, module='numpy')
-        main()
+    #         # open the result object and prepare for result directories if specified
+    #         results = MLResults(config.result_dir)
+    #         results.save_config(config)  # save experiment settings for review
+    #         results.make_dirs(config.save_dir, exist_ok=True)
+    #         with warnings.catch_warnings():
+    #             # suppress DeprecationWarning from NumPy caused by codes in TensorFlow-Probability
+    #             warnings.filterwarnings("ignore", category=DeprecationWarning, module='numpy')
+    #             warnings.filterwarnings("ignore", category=DeprecationWarning, module='tensorflow')
+                
+    #             main()
